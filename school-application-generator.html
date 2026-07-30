@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leave Application Generator</title>
+
+<!-- html2pdf.js turns the on-screen A4 page into an actual PDF file -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+<!--
+  ============================================================
+  READ THIS FIRST — how the file is laid out
+  ============================================================
+  This is ONE file, in three parts:
+
+    1. <style>   - how everything looks
+    2. <body>    - the login screen, the form, and the A4 preview
+    3. <script>  - all the settings, plus the logic that connects
+                   the form to the preview and to the PDF download
+
+  All the things YOU are most likely to want to change live in
+  one place near the top of the <script> section, under the
+  heading "SETTINGS YOU CAN CHANGE". Everything else is normal
+  page behaviour you shouldn't need to touch.
+
+  IMPORTANT — please read before relying on this:
+  This file has no server and no database. Everything (the
+  student list, the codes, the download counts) lives either
+  directly in this file's code, or in this one browser's local
+  storage. That means:
+    - Download counts are only accurate on the same device/
+      browser where the downloads happened. Two students on two
+      different phones do NOT share one shared counter.
+    - The login here is NOT secure. Anyone who views the page's
+      source code can read every email/password/code. It's fine
+      for keeping honest people honest, not for protecting
+      anything sensitive.
+  If you need real accounts and a real shared counter later, that
+  needs an actual backend/database — happy to help with that when
+  you're ready.
+  ============================================================
+-->
+
+<style>
+  :root{
+    --ink:#1c2b3a;
+    --paper:#ffffff;
+    --line:#d8dee5;
+    --panel:#f6f8fa;
+    --accent:#8f1d21;
+    --muted:#5b6b7a;
+    --focus:#2b6cb0;
+    --docgray:#595959;
+  }
+
+  * { box-sizing: border-box; }
+
+  body{
+    margin: 0;
+    font-family: 'Segoe UI', 'Calibri', 'Helvetica Neue', Arial, sans-serif;
+    background: var(--panel);
+    color: var(--ink);
+    /* the background image (if you set one in SETTINGS) shows here */
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+  }
+
+  .hidden{ display: none !important; }
+
+  /* ============================================================
+     LOGIN SCREEN
+     ============================================================ */
+  #loginScreen{
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .login-card{
+    background: #fff;
+    width: 340px;
+    max-width: 100%;
+    padding: 30px 28px;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  }
+  .login-card h1{ font-size: 18px; margin: 0 0 4px; }
+  .login-card p.sub{ font-size: 12.5px; color: var(--muted); margin: 0 0 22px; }
+  .login-card label{
+    display: block; font-size: 11.5px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px;
+  }
+  .login-card input{
+    width: 100%; padding: 10px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  .login-error{ font-size: 12.5px; color: var(--accent); min-height: 18px; margin-top: 10px; }
+  .login-card button{
+    width: 100%; margin-top: 18px; padding: 12px; font-size: 14px; font-weight: 600;
+    border: none; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer;
+  }
+  .login-card button:hover{ background: #731619; }
+
+  /* ============================================================
+     TOP BAR (shown once logged in) — name + download count + logout
+     ============================================================ */
+  #topBar{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+  }
+  #topBar .who{ font-size: 13px; }
+  #topBar .who b{ color: var(--accent); }
+  #topBar button{
+    padding: 8px 14px; font-size: 13px; border-radius: 6px;
+    border: 1px solid var(--line); background: #fff; cursor: pointer;
+  }
+  #topBar button:hover{ background: var(--panel); }
+
+  /* ============================================================
+     MAIN APP LAYOUT — form on the left, A4 preview on the right
+     ============================================================ */
+  .app{
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    min-height: calc(100vh - 49px); /* full height minus the top bar */
+  }
+  @media (max-width: 900px){ .app{ grid-template-columns: 1fr; } }
+
+  .form-panel{
+    background: var(--paper);
+    border-right: 1px solid var(--line);
+    padding: 24px 26px 60px;
+  }
+  .form-panel h2{ font-size: 15px; margin: 0 0 4px; }
+  .form-panel p.sub{ margin: 0 0 20px; font-size: 12.5px; color: var(--muted); }
+  label{
+    display: block; font-size: 11.5px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); margin: 16px 0 6px;
+  }
+  input[type=text], input[type=date], select, textarea{
+    width: 100%; padding: 9px 10px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink);
+  }
+  textarea{ resize: vertical; min-height: 70px; }
+  input:focus, select:focus, textarea:focus{
+    outline: 2px solid var(--focus); outline-offset: 1px; border-color: var(--focus);
+  }
+  .field-row{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .divider{
+    margin: 26px 0 6px; padding-top: 18px; border-top: 1px dashed var(--line);
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--accent); font-weight: 600;
+  }
+  .hint{ font-size: 11.5px; color: var(--muted); margin-top: -4px; }
+  .actions{ margin-top: 32px; }
+  .actions button{
+    width: 100%; font-family: inherit; font-size: 14px; font-weight: 600;
+    padding: 12px 14px; border-radius: 6px; border: none; background: var(--accent);
+    color: #fff; cursor: pointer;
+  }
+  .actions button:hover{ background: #731619; }
+
+  /* ============================================================
+     A4 DOCUMENT PREVIEW — this exact box becomes the PDF
+     ============================================================ */
+  .preview-panel{
+    display: flex; justify-content: center; align-items: flex-start;
+    padding: 40px 24px; overflow: auto;
+  }
+  .sheet{
+    width: 210mm; height: 297mm;
+    background: var(--paper);
+    box-shadow: 0 8px 30px rgba(20,30,40,.15);
+    position: relative;
+    overflow: hidden;
+    color: var(--docgray);
+    user-select: none;
+    -webkit-user-select: none;
+    transition: filter .15s ease;
+  }
+  .sheet img{ -webkit-user-drag: none; pointer-events: none; }
+  .sheet.privacy-blur{ filter: blur(18px); }
+  .sheet .el{ position: absolute; }
+
+  #box-title{ left: 44.59mm; top: 10.92mm; width: 53.82mm; }
+  #box-title .l1, #box-title .l2{ font-size: 10pt; font-weight: 700; text-transform: uppercase; line-height: 1.3; }
+
+  #box-logo{ left: 25.14mm; top: 8.06mm; width: 20.11mm; height: 24.34mm; }
+  #box-logo img{ width: 100%; height: 100%; object-fit: contain; }
+  #box-logo .placeholder{
+    width: 100%; height: 100%; border: 1.5px dashed #b9c2ca; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: #b9c2ca; font-size: 8px; text-align: center;
+  }
+
+  #box-logocaption{ left: 23.85mm; top: 23.85mm; width: 21.96mm; }
+  #box-logocaption span{ font-size: 9pt; font-weight: 700; }
+
+  #box-vline{ left: 24.18mm; top: 55.9mm; width: 0; height: 51.45mm; border-left: 1px solid var(--docgray); }
+
+  #box-school{ left: 23.74mm; top: 49.78mm; width: 67.29mm; }
+  #box-school span{ font-size: 12pt; font-weight: 700; }
+
+  #box-ref{ left: 25.58mm; top: 70.73mm; width: 54.63mm; }
+  #box-ref span{ font-size: 12pt; font-weight: 700; }
+
+  #box-date{ left: 25.58mm; top: 76.73mm; width: 38.1mm; }
+  #box-date span{ font-size: 12pt; font-weight: 700; }
+
+  #box-name{ left: 106.36mm; top: 69.5mm; width: 78.35mm; }
+  #box-name span{ font-size: 14pt; font-weight: 700; }
+  #box-name .val{ text-transform: uppercase; }
+
+  #box-body{ left: 19.67mm; top: 121.37mm; width: 175.26mm; height: 103.63mm; font-size: 12pt; line-height: 1.6; }
+  #box-body p{ margin: 0 0 11px; }
+  #box-body .catword{ font-weight: 700; }
+  #box-body .fatherhead{ font-weight: 700; text-decoration: underline; text-transform: uppercase; margin: 0; }
+  #box-body .fatherhead::before{ content: "\2022  "; text-decoration: none; }
+
+  /* Father's name / CNIC — 1pt bigger than the original template */
+  #box-father{ left: 74.79mm; top: 177.19mm; width: 109.56mm; }
+  #box-father .item{ text-decoration: underline; margin: 0 0 4px; }
+  #box-father .item::before{ content: "o  "; text-decoration: none; font-family: 'Courier New', monospace; }
+  #box-father .lbl14{ font-size: 15pt; }
+  #box-father .val12{ font-size: 13pt; }
+
+  /* Signature / stamp — plain image, no border box */
+  #box-stamp{ left: 98.92mm; top: 218.06mm; width: 33.18mm; height: 27.41mm; }
+  #box-stamp img{ width: 100%; height: 100%; object-fit: contain; }
+  #box-stamp .placeholder{
+    width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+    color: #b9c2ca; font-size: 8px; text-align: center;
+  }
+
+  #box-footer{ left: 17.8mm; top: 258.15mm; width: 101.6mm; font-size: 9pt; line-height: 1.5; }
+  #box-footer .link{ text-decoration: underline; word-break: break-all; }
+
+  /* ============================================================
+     ACCESS-CODE POP-UP (shown when "Download PDF" is clicked)
+     ============================================================ */
+  .modal-overlay{
+    position: fixed; inset: 0; background: rgba(20,25,30,.5);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  .modal-overlay.open{ display: flex; }
+  .modal{
+    background: #fff; border-radius: 10px; padding: 26px 28px; width: 320px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3);
+  }
+  .modal h3{ margin: 0 0 6px; font-size: 16px; }
+  .modal p{ margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+  .modal input{ margin-bottom: 6px; letter-spacing: .2em; text-align: center; font-size: 18px; }
+  .modal-error{ font-size: 12px; color: var(--accent); min-height: 16px; margin-bottom: 8px; }
+  .modal-buttons{ display: flex; gap: 10px; margin-top: 8px; }
+  .modal-buttons button{
+    flex: 1; padding: 10px; font-size: 14px; font-weight: 600; border-radius: 6px; cursor: pointer;
+  }
+  .modal-buttons .confirm{ background: var(--accent); color: #fff; border: none; }
+  .modal-buttons .cancel{ background: #fff; border: 1px solid var(--line); color: var(--ink); }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     LOGIN SCREEN — shown until someone logs in successfully
+     ============================================================ -->
+<div id="loginScreen">
+  <div class="login-card">
+    <h1>Student Login</h1>
+    <p class="sub">Log in with the email and password given to you by your school.</p>
+
+    <label for="loginEmail">Email</label>
+    <input type="text" id="loginEmail" placeholder="you@example.com">
+
+    <label for="loginPassword">Password</label>
+    <input type="text" id="loginPassword" placeholder="Password">
+
+    <div class="login-error" id="loginError"></div>
+    <button type="button" id="loginBtn">Log In</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     THE APP — hidden until login succeeds
+     ============================================================ -->
+<div id="appWrapper" class="hidden">
+
+  <div id="topBar">
+    <div class="who">Logged in as <b id="whoName">—</b> &nbsp;·&nbsp; Forms downloaded: <b id="whoCount">0</b></div>
+    <button type="button" id="logoutBtn">Log out</button>
+  </div>
+
+  <div class="app">
+
+    <div class="form-panel">
+      <h2>Leave / Illness Application Builder</h2>
+      <p class="sub">Fill in the details below — the A4 document on the right updates as you type.</p>
+
+      <label for="schoolName">Institute / school name</label>
+      <input type="text" id="schoolName" value="Private School">
+
+      <label for="logoCaption">Logo caption text</label>
+      <input type="text" id="logoCaption" value="LIONKING">
+
+      <div class="divider">Reference</div>
+      <div class="field-row">
+        <div>
+          <label for="refNo">REF No.</label>
+          <input type="text" id="refNo" value="01072026F0403524">
+        </div>
+        <div>
+          <label for="docDate">Date</label>
+          <input type="date" id="docDate">
+        </div>
+      </div>
+
+      <div class="divider">Student</div>
+      <label for="studentName">Student name</label>
+      <input type="text" id="studentName" placeholder="e.g. Waheed Akhtar">
+
+      <label for="category">Leave category</label>
+      <select id="category">
+        <option value="">Select Category</option>
+        <option value="A1">A1</option>
+        <option value="A2">A2</option>
+        <option value="A3">A3</option>
+      </select>
+
+      <label for="applicantWord">Applicant reference word</label>
+      <input type="text" id="applicantWord" value="abcd">
+
+      <label for="reasonText">Application text</label>
+      <textarea id="reasonText" style="min-height:110px;">The employee is hereby informed that any request for leave from office and the use of th supporting documents, will be reviewed by the management to verify the validity of reason for leave Approval of leave shall be granted in accordance with the company policy, subject to operational requirements and the discretion of the authorized by S. Furthermore to apply for the application, listed documents must be presented along applicatio</textarea>
+
+      <div class="divider">Parent / guardian details</div>
+      <label for="fatherName">Father's name</label>
+      <input type="text" id="fatherName" placeholder="e.g. Naseer Ahmed">
+
+      <label for="cnic">CNIC</label>
+      <input type="text" id="cnic" placeholder="e.g. 34202-0686410-9">
+
+      <div class="divider">Footer</div>
+      <label for="footerInstitute">Institute line</label>
+      <input type="text" id="footerInstitute" value="Institute of Arts and knowlegde">
+
+      <label for="footerAddress">Address line</label>
+      <input type="text" id="footerAddress" value="Street No. 6, Diplomatic Enclave I, G-5 Islamabad 44000">
+
+      <label for="footerLink">Link / code line</label>
+      <input type="text" id="footerLink" value="https://git-rawify.vercel.appDDJASIOJDAIJ">
+
+      <div class="actions">
+        <button type="button" id="downloadBtn">Download PDF</button>
+        <p class="hint">Downloading asks for an access code first.</p>
+      </div>
+    </div>
+
+    <div class="preview-panel">
+      <div class="sheet" id="sheet" oncontextmenu="return false;">
+
+        <div class="el" id="box-title">
+          <div class="l1">Application for leave</div>
+          <div class="l2" id="titleL2">Illness</div>
+        </div>
+
+        <div class="el" id="box-logo">
+          <div class="placeholder">Logo image link</div>
+        </div>
+
+        <div class="el" id="box-logocaption">
+          <span id="logoCaptionOut">LIONKING</span>
+        </div>
+
+        <div class="el" id="box-vline"></div>
+
+        <div class="el" id="box-school">
+          <span id="schoolOut">Private School</span>
+        </div>
+
+        <div class="el" id="box-ref">
+          <span>REF: </span><span id="refOut">01072026F0403524</span>
+        </div>
+
+        <div class="el" id="box-date">
+          <span>Date: </span><span id="dateOut">—</span>
+        </div>
+
+        <div class="el" id="box-name">
+          <span>NAME:</span><span class="val" id="nameOut">—</span>
+        </div>
+
+        <div class="el" id="box-body">
+          <p>With regards to <span id="applicantWordOut">abcd</span> application for the category <span class="catword" id="catOut">Select Category</span></p>
+          <p id="paraReason"></p>
+          <p class="fatherhead">Application of the person's father details</p>
+        </div>
+
+        <div class="el" id="box-father">
+          <div class="item lbl14">NAME: <span class="val" id="fatherOut">—</span></div>
+          <div class="item"><span class="lbl14">CNIC</span><span class="val12">: <span id="cnicOut">—</span></span></div>
+        </div>
+
+        <div class="el" id="box-stamp">
+          <div class="placeholder">Signature / stamp link</div>
+        </div>
+
+        <div class="el" id="box-footer">
+          <div id="footerInstituteOut">Institute of Arts and knowlegde</div>
+          <div id="footerAddressOut">Street No. 6, Diplomatic Enclave I, G-5 Islamabad 44000</div>
+          <div class="link" id="footerLinkOut">https://git-rawify.vercel.appDDJASIOJDAIJ</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Access-code pop-up, shown when "Download PDF" is clicked -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h3>Enter access code</h3>
+    <p>This code is required to generate the PDF. Don't have one? Email <a href="mailto:ahadkhalid281@gmail.com">ahadkhalid281@gmail.com</a>.</p>
+    <input type="text" id="codeInput" maxlength="10" placeholder="Code">
+    <div class="modal-error" id="codeError"></div>
+    <div class="modal-buttons">
+      <button type="button" class="cancel" id="cancelCodeBtn">Cancel</button>
+      <button type="button" class="confirm" id="confirmCodeBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+/* ============================================================================
+   SETTINGS YOU CAN CHANGE
+   Everything you're likely to want to edit lives right here.
+   ============================================================================ */
+
+// ██████████████████████████████████████████████████████████████████████████
+// █                                                                        █
+// █   LOGO & SIGNATURE LINKS  —  ONLY YOU CAN CHANGE THESE                 █
+// █   Students never see a box to edit these — the links below are the    █
+// █   only place they come from. Paste a new image link between the      █
+// █   quotes any time your logo or signature changes, save the file,     █
+// █   and every student's document updates automatically.                 █
+// █                                                                        █
+// ██████████████████████████████████████████████████████████████████████████
+var LOGO_URL      = "https://share.google/taNGMcDtzmYE08w4j"; // top-left header logo
+var SIGNATURE_URL = "https://share.google/taNGMcDtzmYE08w4j"; // bottom signature / stamp
+
+// ---- Student accounts ----
+// Add as many students as you want. Copy a line, change the email/
+// password/name, and add a comma after the line above it.
+var USERS = [
+  { email: "student1@example.com", password: "changeme1", name: "Student One" },
+  { email: "student2@example.com", password: "changeme2", name: "Student Two" }
+];
+
+// ---- Access codes ----
+// Any ONE of these unlocks the PDF download. Add or remove as needed.
+var ACCESS_CODES = ["6266", "1234"];
+
+// ---- Background image ----
+// Paste an image link here to use it as the page background.
+// Leave it as "" (empty quotes) for no background image.
+var BACKGROUND_IMAGE_URL = "";
+
+if (BACKGROUND_IMAGE_URL) {
+  document.body.style.backgroundImage = "url('" + BACKGROUND_IMAGE_URL + "')";
+}
+
+
+/* ============================================================================
+   LOGIN
+   ============================================================================ */
+var loginScreen   = document.getElementById("loginScreen");
+var appWrapper    = document.getElementById("appWrapper");
+var loginEmail    = document.getElementById("loginEmail");
+var loginPassword = document.getElementById("loginPassword");
+var loginError    = document.getElementById("loginError");
+var loginBtn      = document.getElementById("loginBtn");
+var logoutBtn     = document.getElementById("logoutBtn");
+var whoName       = document.getElementById("whoName");
+var whoCount      = document.getElementById("whoCount");
+
+var currentUser = null; // the logged-in user's info, once logged in
+
+// finds a user in the USERS list by email + password, or returns null
+function findUser(email, password) {
+  for (var i = 0; i < USERS.length; i++) {
+    if (USERS[i].email.toLowerCase() === email.toLowerCase() && USERS[i].password === password) {
+      return USERS[i];
+    }
+  }
+  return null;
+}
+
+// how many forms this email has downloaded, remembered in this browser
+function getDownloadCount(email) {
+  var stored = localStorage.getItem("downloads_" + email);
+  return stored ? parseInt(stored, 10) : 0;
+}
+function incrementDownloadCount(email) {
+  var newCount = getDownloadCount(email) + 1;
+  localStorage.setItem("downloads_" + email, newCount);
+  return newCount;
+}
+
+function showApp(user) {
+  currentUser = user;
+  whoName.textContent = user.name;
+  whoCount.textContent = getDownloadCount(user.email);
+  loginScreen.classList.add("hidden");
+  appWrapper.classList.remove("hidden");
+}
+
+function attemptLogin() {
+  var email = loginEmail.value.trim();
+  var password = loginPassword.value;
+  var user = findUser(email, password);
+
+  if (!user) {
+    loginError.textContent = "Incorrect email or password.";
+    return;
+  }
+
+  loginError.textContent = "";
+  localStorage.setItem("loggedInEmail", user.email); // stay logged in on refresh
+  showApp(user);
+}
+
+loginBtn.addEventListener("click", attemptLogin);
+loginPassword.addEventListener("keydown", function (event) {
+  if (event.key === "Enter") attemptLogin();
+});
+
+logoutBtn.addEventListener("click", function () {
+  localStorage.removeItem("loggedInEmail");
+  currentUser = null;
+  appWrapper.classList.add("hidden");
+  loginScreen.classList.remove("hidden");
+  loginEmail.value = "";
+  loginPassword.value = "";
+});
+
+// if this browser already had someone logged in, skip straight to the app
+(function checkExistingLogin() {
+  var savedEmail = localStorage.getItem("loggedInEmail");
+  if (!savedEmail) return;
+  for (var i = 0; i < USERS.length; i++) {
+    if (USERS[i].email === savedEmail) {
+      showApp(USERS[i]);
+      return;
+    }
+  }
+})();
+
+
+/* ============================================================================
+   FORM -> DOCUMENT PREVIEW
+   Every input on the left has a matching "...Out" span on the right.
+   updatePreview() just copies one into the other.
+   ============================================================================ */
+var schoolNameInput      = document.getElementById("schoolName");
+var logoCaptionInput     = document.getElementById("logoCaption");
+var refNoInput           = document.getElementById("refNo");
+var docDateInput         = document.getElementById("docDate");
+var studentNameInput     = document.getElementById("studentName");
+var categoryInput        = document.getElementById("category");
+var applicantWordInput   = document.getElementById("applicantWord");
+var reasonTextInput      = document.getElementById("reasonText");
+var fatherNameInput      = document.getElementById("fatherName");
+var cnicInput            = document.getElementById("cnic");
+var footerInstituteInput = document.getElementById("footerInstitute");
+var footerAddressInput   = document.getElementById("footerAddress");
+var footerLinkInput      = document.getElementById("footerLink");
+
+var schoolOut          = document.getElementById("schoolOut");
+var logoCaptionOut     = document.getElementById("logoCaptionOut");
+var refOut             = document.getElementById("refOut");
+var dateOut             = document.getElementById("dateOut");
+var nameOut             = document.getElementById("nameOut");
+var catOut               = document.getElementById("catOut");
+var titleL2              = document.getElementById("titleL2");
+var applicantWordOut    = document.getElementById("applicantWordOut");
+var paraReason           = document.getElementById("paraReason");
+var fatherOut            = document.getElementById("fatherOut");
+var cnicOut              = document.getElementById("cnicOut");
+var footerInstituteOut  = document.getElementById("footerInstituteOut");
+var footerAddressOut    = document.getElementById("footerAddressOut");
+var footerLinkOut        = document.getElementById("footerLinkOut");
+
+var logoBox  = document.getElementById("box-logo");
+var stampBox = document.getElementById("box-stamp");
+var sheet    = document.getElementById("sheet");
+
+function getTodayAsISODate() {
+  return new Date().toISOString().slice(0, 10);
+}
+function formatDateForDisplay(isoDate) {
+  if (!isoDate) return "—";
+  var parts = isoDate.split("-");
+  return parts[2] + "/" + parts[1] + "/" + parts[0];
+}
+
+function updatePreview() {
+  schoolOut.textContent = schoolNameInput.value || "—";
+  logoCaptionOut.textContent = logoCaptionInput.value;
+  refOut.textContent = refNoInput.value || "—";
+  dateOut.textContent = formatDateForDisplay(docDateInput.value);
+  nameOut.textContent = studentNameInput.value || "—";
+
+  var chosenCategory = categoryInput.value;
+  catOut.textContent = chosenCategory || "Select Category";
+  titleL2.textContent = chosenCategory || "Illness";
+
+  applicantWordOut.textContent = applicantWordInput.value;
+  paraReason.textContent = reasonTextInput.value;
+  fatherOut.textContent = fatherNameInput.value || "—";
+  cnicOut.textContent = cnicInput.value || "—";
+
+  footerInstituteOut.textContent = footerInstituteInput.value;
+  footerAddressOut.textContent = footerAddressInput.value;
+  footerLinkOut.textContent = footerLinkInput.value;
+}
+
+// These use LOGO_URL / SIGNATURE_URL from the highlighted settings block
+// at the top of this script — students have no box to change these.
+function updateLogoPicture() {
+  logoBox.innerHTML = LOGO_URL
+    ? '<img src="' + LOGO_URL + '" alt="logo">'
+    : '<div class="placeholder">Logo image link</div>';
+}
+function updateStampPicture() {
+  stampBox.innerHTML = SIGNATURE_URL
+    ? '<img src="' + SIGNATURE_URL + '" alt="signature or stamp">'
+    : '<div class="placeholder">Signature / stamp link</div>';
+}
+
+[schoolNameInput, logoCaptionInput, refNoInput, docDateInput, studentNameInput,
+ categoryInput, applicantWordInput, reasonTextInput, fatherNameInput, cnicInput,
+ footerInstituteInput, footerAddressInput, footerLinkInput
+].forEach(function (input) { input.addEventListener("input", updatePreview); });
+
+docDateInput.value = getTodayAsISODate();
+updateLogoPicture();
+updateStampPicture();
+updatePreview();
+
+
+/* ============================================================================
+   CAPTURE DETERRENTS (see the note at the top of this file — these
+   raise the effort needed but cannot fully block OS screenshot tools)
+   ============================================================================ */
+sheet.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+sheet.addEventListener("copy", function (e) { e.preventDefault(); });
+sheet.addEventListener("selectstart", function (e) { e.preventDefault(); });
+
+window.addEventListener("blur", function () { sheet.classList.add("privacy-blur"); });
+window.addEventListener("focus", function () { sheet.classList.remove("privacy-blur"); });
+document.addEventListener("visibilitychange", function () {
+  sheet.classList.toggle("privacy-blur", document.hidden);
+});
+
+
+/* ============================================================================
+   DOWNLOAD: ask for an access code, then build the PDF
+   ============================================================================ */
+var downloadBtn      = document.getElementById("downloadBtn");
+var modalOverlay     = document.getElementById("modalOverlay");
+var codeInput        = document.getElementById("codeInput");
+var codeError        = document.getElementById("codeError");
+var confirmCodeBtn   = document.getElementById("confirmCodeBtn");
+var cancelCodeBtn    = document.getElementById("cancelCodeBtn");
+
+downloadBtn.addEventListener("click", function () {
+  codeInput.value = "";
+  codeError.textContent = "";
+  modalOverlay.classList.add("open");
+  codeInput.focus();
+});
+cancelCodeBtn.addEventListener("click", function () {
+  modalOverlay.classList.remove("open");
+});
+confirmCodeBtn.addEventListener("click", checkAccessCode);
+codeInput.addEventListener("keydown", function (e) {
+  if (e.key === "Enter") checkAccessCode();
+});
+
+function checkAccessCode() {
+  // ACCESS_CODES.indexOf(...) is -1 if the typed code isn't in the list
+  if (ACCESS_CODES.indexOf(codeInput.value.trim()) !== -1) {
+    modalOverlay.classList.remove("open");
+    generatePdf();
+  } else {
+    codeError.textContent = "Incorrect code. Try again.";
+  }
+}
+
+function generatePdf() {
+  var name = studentNameInput.value.trim() || "application";
+  var filename = name.replace(/\s+/g, "_") + "_leave_application.pdf";
+
+  html2pdf().set({
+    margin: 0,
+    filename: filename,
+    image: { type: "jpeg", quality: 0.98 },
+    html2canvas: { scale: 3, useCORS: true },
+    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+  }).from(sheet).save().then(function () {
+    // count this as one more download for whoever is logged in
+    if (currentUser) {
+      var newCount = incrementDownloadCount(currentUser.email);
+      whoCount.textContent = newCount;
+    }
+  });
+}
+</script>
+
+</body>
+</html>
